@@ -57,9 +57,9 @@ jobs:
       # Step 10: Create dist directory and move DEB file
       - name: Create dist directory and move DEB file
         run: |
+
           mkdir -p dist
           mv dist/*/*.deb dist/
-
       # Step 11: Upload the DEB file as an artifact (optional)
       - name: Upload DEB File as Artifact
         uses: actions/upload-artifact@v3
