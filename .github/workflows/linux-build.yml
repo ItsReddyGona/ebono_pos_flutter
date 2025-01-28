@@ -20,29 +20,37 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # Step 2: Set up Flutter
+      # Step 2: Remove Flutter and caches (if any)
+      - name: Clean Existing Flutter and Caches
+        run: |
+          rm -rf $HOME/flutter
+          rm -rf ~/.pub-cache
+          rm -rf ~/.flutter_cache
+          rm -rf ~/.dart_tool
+
+      # Step 3: Set up Flutter
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "stable"
+          flutter-version: "3.24.0"
 
-      # Step 3: Install dependencies
+      # Step 4: Install dependencies
       - name: Install Dependencies
         run: flutter pub get
 
-      # Step 4: Enable Linux desktop support
+      # Step 5: Enable Linux desktop support
       - name: Enable Linux Desktop
         run: flutter config --enable-linux-desktop
 
-      # Step 5: Install flutter_distributor
+      # Step 6: Install flutter_distributor
       - name: Install flutter_distributor
         run: flutter pub global activate flutter_distributor
 
-      # Step 6: Build and release the Linux DEB package using flutter_distributor
+      # Step 7: Build and release the Linux DEB package using flutter_distributor
       - name: Build and Release with flutter_distributor
         run: flutter_distributor release --name=prod --jobs=release-prod-linux-deb
 
-      # Step 7: Upload the DEB file as an artifact
+      # Step 8: Upload the DEB file as an artifact
       - name: Upload DEB File
         uses: actions/upload-artifact@v3
         with:
