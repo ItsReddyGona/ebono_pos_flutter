@@ -1,10 +1,7 @@
 name: Build Linux and Upload DEB
 
 on:
-  push:
-    branches:
-      - dev # Trigger on push to the 'dev' branch
-  workflow_dispatch: # Allow manual trigger of the workflow
+  workflow_dispatch: # This triggers the workflow manually from the GitHub UI
 
 jobs:
   build-linux:
@@ -15,7 +12,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # Step 2: Cache Flutter SDK (Ensure we don't download it every time)
+      # Step 2: Cache Flutter SDK
       - name: Cache Flutter SDK
         uses: actions/cache@v3
         with:
@@ -24,17 +21,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-flutter-
 
-      # Step 3: Set up Flutter (only if SDK not cached)
+      # Step 3: Set up Flutter
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.27.3" # Use a specific Flutter version
+          flutter-version: "3.27.3"
 
       # Step 4: Install dependencies
       - name: Install Dependencies
         run: flutter pub get
 
-      # Step 5: Enable Linux desktop support
+      # Step 5: Enable Linux Desktop
       - name: Enable Linux Desktop
         run: flutter config --enable-linux-desktop
 
@@ -42,17 +39,27 @@ jobs:
       - name: Install flutter_distributor
         run: flutter pub global activate flutter_distributor
 
-      # Step 7: Build and release the Linux DEB package
+      # Step 7: Install dependencies for building Linux application
+      - name: Install dependencies for building Linux application
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++ cmake
+
+      # Step 8: Build and release the Linux DEB package
       - name: Build and Release with flutter_distributor
         run: flutter_distributor release --name=prod --jobs=release-prod-linux-deb
 
-      # # Step 8: Create dist directory and move DEB file there
-      # - name: Create dist directory and move DEB file
-      #   run: |
-      #     mkdir -p dist
-      #     mv dist/*/*.deb dist/
+      # Step 9: List contents of dist directory for debugging
+      - name: List contents of dist directory
+        run: ls -R dist
 
-      # Step 8: Push the DEB file to the repository
+      # Step 10: Create dist directory and move DEB file
+      - name: Create dist directory and move DEB file
+        run: |
+          mkdir -p dist
+          mv dist/*/*.deb dist/
+
+      # Step 11: Push DEB file to the repository
       - name: Push DEB file to the repository
         run: |
           git config --global user.name "github-actions[bot]"
@@ -63,7 +70,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 9: Upload the DEB file as an artifact (optional)
+      # Step 12: Upload the DEB file as an artifact (optional)
       - name: Upload DEB File as Artifact
         uses: actions/upload-artifact@v3
         with:
