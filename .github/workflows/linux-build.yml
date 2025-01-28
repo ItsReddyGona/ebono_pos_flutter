@@ -46,13 +46,13 @@ jobs:
       - name: Build and Release with flutter_distributor
         run: flutter_distributor release --name=prod --jobs=release-prod-linux-deb
 
-      # Step 8: Create dist directory and move DEB file there
-      - name: Create dist directory and move DEB file
-        run: |
-          mkdir -p dist
-          mv dist/*/*.deb dist/
+      # # Step 8: Create dist directory and move DEB file there
+      # - name: Create dist directory and move DEB file
+      #   run: |
+      #     mkdir -p dist
+      #     mv dist/*/*.deb dist/
 
-      # Step 9: Push the DEB file to the repository
+      # Step 8: Push the DEB file to the repository
       - name: Push DEB file to the repository
         run: |
           git config --global user.name "github-actions[bot]"
@@ -63,7 +63,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 10: Upload the DEB file as an artifact (optional)
+      # Step 9: Upload the DEB file as an artifact (optional)
       - name: Upload DEB File as Artifact
         uses: actions/upload-artifact@v3
         with:
