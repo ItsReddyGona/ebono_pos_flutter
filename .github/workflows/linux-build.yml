@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # Step 2: Cache Flutter SDK
+      # Step 2: Cache Flutter SDK (Ensure we don't download it every time)
       - name: Cache Flutter SDK
         uses: actions/cache@v3
         with:
@@ -24,37 +24,47 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-flutter-
 
-      # Step 3: Clean Flutter and Caches (optional if caching is used)
-      - name: Clean Flutter and Caches
-        run: |
-          rm -rf ~/.pub-cache
-          rm -rf ~/.flutter_cache
-          rm -rf ~/.dart_tool
-
-      # Step 4: Set up Flutter (if Flutter SDK is not cached)
+      # Step 3: Set up Flutter (only if SDK not cached)
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.27.3" # Ensure compatibility with Dart ^3.5.3
+          flutter-version: "3.27.3" # Use a specific Flutter version
 
-      # Step 5: Install dependencies
+      # Step 4: Install dependencies
       - name: Install Dependencies
         run: flutter pub get
 
-      # Step 6: Enable Linux desktop support
+      # Step 5: Enable Linux desktop support
       - name: Enable Linux Desktop
         run: flutter config --enable-linux-desktop
 
-      # Step 7: Install flutter_distributor
+      # Step 6: Install flutter_distributor
       - name: Install flutter_distributor
         run: flutter pub global activate flutter_distributor
 
-      # Step 8: Build and release the Linux DEB package
+      # Step 7: Build and release the Linux DEB package
       - name: Build and Release with flutter_distributor
         run: flutter_distributor release --name=prod --jobs=release-prod-linux-deb
 
-      # Step 9: Upload the DEB file as an artifact
-      - name: Upload DEB File
+      # Step 8: Create dist directory and move DEB file there
+      - name: Create dist directory and move DEB file
+        run: |
+          mkdir -p dist
+          mv dist/*/*.deb dist/
+
+      # Step 9: Push the DEB file to the repository
+      - name: Push DEB file to the repository
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add dist/*.deb
+          git commit -m "Add Linux DEB build"
+          git push origin dev
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 10: Upload the DEB file as an artifact (optional)
+      - name: Upload DEB File as Artifact
         uses: actions/upload-artifact@v3
         with:
           name: linux-build
