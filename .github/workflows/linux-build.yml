@@ -21,11 +21,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-flutter-
 
-      # Step 3: Set up Flutter
+      # Step 3: Set up Flutter (only if cache is missed)
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.27.3"
+        if: steps.cache.outputs.cache-hit != 'true'
 
       # Step 4: Install dependencies
       - name: Install Dependencies
@@ -59,20 +60,9 @@ jobs:
           mkdir -p dist
           mv dist/*/*.deb dist/
 
-      # Step 11: Push DEB file to the repository
-      - name: Push DEB file to the repository
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add dist/*.deb
-          git commit -m "Add Linux DEB build"
-          git push origin dev
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Step 12: Upload the DEB file as an artifact (optional)
+      # Step 11: Upload the DEB file as an artifact (optional)
       - name: Upload DEB File as Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: linux-build
+          name: linux-deb-build
           path: dist/**/*.deb
