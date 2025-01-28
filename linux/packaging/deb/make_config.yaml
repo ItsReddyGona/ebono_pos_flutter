@@ -1,5 +1,6 @@
 display_name: Ebono POS
 package_name: ebonopos
+output_file: ebono_pos_prod.deb
 
 maintainer:
   name: Jagath Ratchagan
