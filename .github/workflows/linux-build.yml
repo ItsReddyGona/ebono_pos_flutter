@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - dev # Trigger on push to the 'dev' branch
-  rebase:
-    branches:
-      - dev # Trigger on rebase in the 'dev' branch
   workflow_dispatch: # Allow manual trigger of the workflow
     inputs:
       branch:
