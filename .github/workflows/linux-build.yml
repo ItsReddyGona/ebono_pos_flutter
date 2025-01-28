@@ -5,11 +5,6 @@ on:
     branches:
       - dev # Trigger on push to the 'dev' branch
   workflow_dispatch: # Allow manual trigger of the workflow
-    inputs:
-      branch:
-        description: "Build Linux and Upload DEB"
-        required: true
-        default: "dev"
 
 jobs:
   build-linux:
@@ -20,39 +15,47 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # Step 2: Remove Flutter and caches (if any)
-      - name: Clean Existing Flutter and Caches
+      # Step 2: Cache Flutter SDK
+      - name: Cache Flutter SDK
+        uses: actions/cache@v3
+        with:
+          path: ~/.flutter
+          key: ${{ runner.os }}-flutter-${{ hashFiles('**/flutter_version.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-
+
+      # Step 3: Clean Flutter and Caches (optional if caching is used)
+      - name: Clean Flutter and Caches
         run: |
-          rm -rf $HOME/flutter
           rm -rf ~/.pub-cache
           rm -rf ~/.flutter_cache
           rm -rf ~/.dart_tool
 
-      # Step 3: Set up Flutter
+      # Step 4: Set up Flutter (if Flutter SDK is not cached)
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.24.0"
+          flutter-version: "3.27.3" # Ensure compatibility with Dart ^3.5.3
 
-      # Step 4: Install dependencies
+      # Step 5: Install dependencies
       - name: Install Dependencies
         run: flutter pub get
 
-      # Step 5: Enable Linux desktop support
+      # Step 6: Enable Linux desktop support
       - name: Enable Linux Desktop
         run: flutter config --enable-linux-desktop
 
-      # Step 6: Install flutter_distributor
+      # Step 7: Install flutter_distributor
       - name: Install flutter_distributor
         run: flutter pub global activate flutter_distributor
 
-      # Step 7: Build and release the Linux DEB package using flutter_distributor
+      # Step 8: Build and release the Linux DEB package
       - name: Build and Release with flutter_distributor
         run: flutter_distributor release --name=prod --jobs=release-prod-linux-deb
 
-      # Step 8: Upload the DEB file as an artifact
+      # Step 9: Upload the DEB file as an artifact
       - name: Upload DEB File
         uses: actions/upload-artifact@v3
         with:
           name: linux-build
-          path: dist/**.deb
+          path: dist/**/*.deb
