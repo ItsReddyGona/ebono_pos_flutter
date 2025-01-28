@@ -6,7 +6,7 @@ releases:
         package:
           platform: linux
           target: deb
-          output_name: ebono_pos_stage_${{ steps.read_version.outputs.version }}.deb
+          output_name: ebono_pos_stage${{ steps.read_version.outputs.version }}.deb
           build_args:
             enable-experiment: records
           extra_args:
