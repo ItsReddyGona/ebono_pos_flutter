@@ -1,0 +1,53 @@
+name: Build Linux and Upload DEB
+
+on:
+  push:
+    branches:
+      - dev # Trigger on push to the 'dev' branch
+  rebase:
+    branches:
+      - dev # Trigger on rebase in the 'dev' branch
+  workflow_dispatch: # Allow manual trigger of the workflow
+    inputs:
+      branch:
+        description: "Build Linux and Upload DEB"
+        required: true
+        default: "dev"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Flutter
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "stable"
+
+      # Step 3: Install dependencies
+      - name: Install Dependencies
+        run: flutter pub get
+
+      # Step 4: Enable Linux desktop support
+      - name: Enable Linux Desktop
+        run: flutter config --enable-linux-desktop
+
+      # Step 5: Install flutter_distributor
+      - name: Install flutter_distributor
+        run: flutter pub global activate flutter_distributor
+
+      # Step 6: Build and release the Linux DEB package using flutter_distributor
+      - name: Build and Release with flutter_distributor
+        run: flutter_distributor release --name=prod --jobs=release-prod-linux-deb
+
+      # Step 7: Upload the DEB file as an artifact
+      - name: Upload DEB File
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-build
+          path: dist/**.deb
