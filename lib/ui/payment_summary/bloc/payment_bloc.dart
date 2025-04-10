@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ebono_pos/constants/shared_preference_constants.dart';
 import 'package:ebono_pos/data_store/hive_storage_helper.dart';
+import 'package:ebono_pos/ui/home/home_controller.dart';
 import 'package:ebono_pos/ui/home/model/phone_number_request.dart';
 import 'package:ebono_pos/ui/login/model/terminal_details_response.dart';
 import 'package:ebono_pos/ui/payment_summary/bloc/payment_event.dart';
@@ -25,6 +26,7 @@ import 'package:get/get.dart';
 class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
   final PaymentRepository _paymentRepository;
   final HiveStorageHelper hiveStorageHelper;
+  final HomeController _homeController;
 
   Timer? _timer;
   late PaymentSummaryRequest paymentSummaryRequest;
@@ -39,6 +41,7 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
 
   String cashPayment = '';
   String onlinePayment = '';
+  String offlinePayment = '';
   String loyaltyValue = '';
   String walletValue = '';
   String p2pRequestId = '';
@@ -56,8 +59,10 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
   List<EdcDevice> edcDetails = [];
   StreamSubscription? _orderInvoiceSubscription;
   Timer? _sseFallbackTimer;
-
-  PaymentBloc(this._paymentRepository, this.hiveStorageHelper)
+  bool isOfflineMode = false;
+  bool isOfflinePaymentVerified = false;
+  PaymentBloc(
+      this._paymentRepository, this.hiveStorageHelper, this._homeController)
       : super(PaymentState()) {
     on<PaymentInitialEvent>(_onInitial);
     on<FetchPaymentSummary>(_fetchPaymentSummary);
@@ -76,7 +81,7 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
   void _startPeriodicPaymentStatusCheck() {
     _timer = Timer.periodic(Duration(seconds: 3), (timer) {
       if (!state.stopTimer) {
-        add(PaymentStatusEvent());
+        add(PaymentStatusEvent(isFromDialogue: false));
       } else {
         _timer?.cancel();
       }
@@ -88,6 +93,7 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
     paymentMethods?.clear();
     cashPayment = '';
     onlinePayment = '';
+    offlinePayment = '';
     emit(state.copyWith(
       initialState: false,
       isLoading: false,
@@ -124,8 +130,16 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
       paymentSummaryResponse =
           await _paymentRepository.fetchPaymentSummary(paymentSummaryRequest);
 
+      _homeController.orderNumber.value =
+          paymentSummaryResponse.orderNumber ?? '';
+
       emit(state.copyWith(isLoading: false, isPaymentSummarySuccess: true));
+
+      isOfflineMode = paymentSummaryResponse.paymentOptions
+              ?.any((option) => option.code == "STATIC_QR_CODE") ??
+          false;
     } catch (error) {
+      _homeController.orderNumber.value = '';
       emit(state.copyWith(
           isLoading: false,
           isPaymentSummaryError: true,
@@ -135,7 +149,7 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
 
   Future<void> _paymentInitiateApi(
       PaymentStartEvent event, Emitter<PaymentState> emit) async {
-    emit(state.copyWith(isLoading: true, initialState: false));
+    emit(state.copyWith(isLoading: true, initialState: false,isOnlinePaymentSuccess: true));
 
     final reqBody = {
       "amount": onlinePayment,
@@ -168,7 +182,9 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
         emit(state.copyWith(
             isLoading: false,
             showPaymentPopup: paymentInitiateResponse.success,
-            isPaymentStartSuccess: paymentInitiateResponse.success));
+            isPaymentStartSuccess: paymentInitiateResponse.success,
+            isOnlinePaymentSuccess: true,
+        ));
         if (paymentInitiateResponse.p2PRequestId != "") {
           _startPeriodicPaymentStatusCheck();
           p2pRequestId = paymentInitiateResponse.p2PRequestId!;
@@ -180,12 +196,15 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
         emit(state.copyWith(
             isLoading: false,
             showPaymentPopup: false,
-            isPaymentStartSuccess: false));
+            isPaymentStartSuccess: false,
+            isOnlinePaymentSuccess: false,
+        ));
       }
     } catch (error) {
       emit(state.copyWith(
           isLoading: false,
           isPaymentSummaryError: true,
+          isOnlinePaymentSuccess: false,
           errorMessage: error.toString()));
     }
   }
@@ -202,9 +221,13 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
     print('Payment Status Request: ${paymentStatusRequest.origP2PRequestId}');
 
     try {
+      if(event.isFromDialogue){
+        emit(state.copyWith(isLoading: true));
+        closeSnackBar();
+      }
       paymentStatusResponse =
-          await _paymentRepository.paymentStatusApiCall(paymentStatusRequest);
-
+      await _paymentRepository.paymentStatusApiCall(paymentStatusRequest);
+      if(event.isFromDialogue) emit(state.copyWith(isLoading: false));
       print(
           "Success payment status --> : ${paymentStatusResponse.abstractPaymentStatus}");
       switch (paymentStatusResponse.messageCode) {
@@ -229,8 +252,11 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
                 isOnlinePaymentSuccess: false,
                 isPaymentCancelSuccess: true));
           }
+          closeSnackBar();
           Get.back();
-          Get.snackbar('Payment status ${paymentStatusResponse.status}',
+
+          Get.snackbar(
+              'Payment status ${paymentStatusResponse.status}',
               '${paymentStatusResponse.message}');
 
           break;
@@ -244,6 +270,7 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
               showPaymentPopup: false,
               isOnlinePaymentSuccess: false,
               isPaymentCancelSuccess: true));
+          closeSnackBar();
           Get.back();
           Get.snackbar('Payment status', '${paymentStatusResponse.message}');
           break;
@@ -258,13 +285,28 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
           break;
         case "P2P_ORIGINAL_P2P_REQUEST_IS_MISSING":
           p2pRequestId = '';
-          emit(state.copyWith(stopTimer: true, showPaymentPopup: false));
+          emit(state.copyWith(stopTimer: true, showPaymentPopup: false,isOnlinePaymentSuccess: false));
+          closeSnackBar();
+          Get.back();
+          Get.snackbar('Payment status', '${paymentStatusResponse.message}');
+
+          break;
+        case "P2P_DUPLICATE_CANCEL_REQUEST" ||
+        "P2P_ORIGINAL_P2P_REQUEST_IS_MISSING":
+          p2pRequestId = '';
+          emit(state.copyWith(
+              stopTimer: true,
+              showPaymentPopup: false,
+              isOnlinePaymentSuccess: false,
+              isPaymentCancelSuccess: true));
+          closeSnackBar();
           Get.back();
           Get.snackbar('Payment status', '${paymentStatusResponse.message}');
           break;
         default:
+          closeSnackBar();
           Get.back();
-          emit(state.copyWith(stopTimer: true, showPaymentPopup: false));
+          emit(state.copyWith(stopTimer: true, showPaymentPopup: false,isOnlinePaymentSuccess: false));
           break;
       }
     } catch (error) {
@@ -273,14 +315,16 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
           isPaymentSummaryError: true,
           showPaymentPopup: false,
           errorMessage: error.toString(),
-          stopTimer: true));
+          stopTimer: true,
+          isOnlinePaymentSuccess: false,
+      ));
       _timer?.cancel();
     }
   }
 
   Future<void> _paymentCancelApi(
       PaymentCancelEvent event, Emitter<PaymentState> emit) async {
-    emit(state.copyWith(isLoading: false, initialState: false));
+    emit(state.copyWith(isLoading: true, initialState: false));
     final reqBody = {
       "username": edcDetails.firstOrNull?.username,
       "appKey": edcDetails.firstOrNull?.appKey,
@@ -295,10 +339,11 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
     try {
       paymentStatusResponse =
           await _paymentRepository.paymentCancelApiCall(paymentCancelRequest);
-
       if (paymentStatusResponse.success == true) {
         emit(state.copyWith(
+            isLoading: false,
             isPaymentCancelSuccess: paymentStatusResponse.success,
+            isOnlinePaymentSuccess: false,
             showPaymentPopup: false));
         Get.back();
       } else {
@@ -308,12 +353,17 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
                 "P2P_ORIGINAL_P2P_REQUEST_IS_MISSING") {
           Get.back();
         }
+        emit(state.copyWith(
+            isLoading: false,
+            isOnlinePaymentSuccess: false,
+        ));
         Get.snackbar('Error', '${paymentInitiateResponse.message}');
       }
     } catch (error) {
       emit(state.copyWith(
           isLoading: false,
           isPaymentSummaryError: true,
+          isOnlinePaymentSuccess: false,
           errorMessage: error.toString()));
     }
   }
@@ -323,25 +373,43 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
     cashAmount = double.parse(event.cash);
     onlineAmount = double.parse(event.online);
     walletAmount = double.parse(event.wallet);
+
+    var offlineAmount = 0.0;
+    if (isOfflineMode) {
+      offlinePayment = event.online;
+      offlineAmount = double.tryParse(event.online) ?? 0.0;
+    }
     var givenAmount = cashAmount + onlineAmount /*+ walletAmount*/;
     totalPayable = (paymentSummaryResponse.amountPayable?.centAmount ?? 0) /
         (paymentSummaryResponse.amountPayable?.fraction ?? 1);
-    if (event.online != '0') {
-      emit(state.copyWith(isOnlinePaymentSuccess: true));
-    }
     balancePayable = totalPayable - givenAmount;
     if (balancePayable <= 0) {
       if (onlinePayment.isNotEmpty && onlinePayment != '0') {
         if (state.isPaymentStatusSuccess) {
           allowPlaceOrder = true;
-        }else if(totalPayable == 0){
+        } else if (totalPayable == 0) {
           allowPlaceOrder = true;
-        }
-        else {
+        } else {
           allowPlaceOrder = false;
         }
+        if (isOfflineMode &&
+            isOfflinePaymentVerified &&
+            (totalPayable - cashAmount - offlineAmount) == 0) {
+          allowPlaceOrder = true;
+        }
       } else {
-        allowPlaceOrder = true;
+        // print('STEP:3 $totalPayable - $onlineAmount +$offlineAmount');
+        if (isOfflineMode &&
+            isOfflinePaymentVerified &&
+            (totalPayable - cashAmount - offlineAmount) == 0) {
+          allowPlaceOrder = true;
+        } else if (isOfflineMode &&
+            !isOfflinePaymentVerified &&
+            offlineAmount <= 0) {
+          allowPlaceOrder = true;
+        } else if (!isOfflineMode) {
+          allowPlaceOrder = true;
+        }
       }
     } else {
       allowPlaceOrder = false;
@@ -354,7 +422,6 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
   Future<void> _placeOrder(
       PlaceOrderEvent event, Emitter<PaymentState> emit) async {
     emit(state.copyWith(isLoading: true));
-
     try {
       if (cashPayment.isNotEmpty) {
         cashPaymentOption = paymentSummaryResponse.paymentOptions?.firstWhere(
@@ -373,7 +440,7 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
               MethodDetail(key: "METHOD", value: "CASH"),
             ]));
       }
-      if (onlinePayment.isNotEmpty) {
+      if (onlinePayment.isNotEmpty && isOfflineMode == false) {
         onlinePaymentOption = paymentSummaryResponse.paymentOptions?.firstWhere(
           (option) =>
               option.code == paymentStatusResponse.paymentMode?.toUpperCase(),
@@ -387,6 +454,22 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
             methodDetail: [
               MethodDetail(
                   key: "METHOD", value: paymentStatusResponse.paymentMode),
+            ]));
+      }
+      if (offlinePayment.isNotEmpty &&
+          (double.tryParse(offlinePayment) ?? 0.0) > 0) {
+        final offlinePaymentOption =
+            paymentSummaryResponse.paymentOptions?.firstWhere(
+          (option) => option.code == 'STATIC_QR_CODE',
+        );
+        paymentMethods?.add(PaymentMethod(
+            paymentOptionId: offlinePaymentOption?.paymentOptionId,
+            pspId: offlinePaymentOption?.pspId,
+            requestId: paymentSummaryRequest.cartId,
+            transactionReferenceId: paymentSummaryRequest.cartId,
+            amount: double.tryParse(offlinePayment) ?? 0.0,
+            methodDetail: [
+              MethodDetail(key: "METHOD", value: "STATIC QR CODE"),
             ]));
       }
       var appliedWalletAmount = getPrice(
@@ -433,7 +516,9 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
           isLoading: true,
           allowPrintInvoice: false,
         ));
-        listenToOrderInvoiceSSE(orderSummaryResponse.orderNumber!);
+        if (!isOfflineMode) {
+          listenToOrderInvoiceSSE(orderSummaryResponse.orderNumber!);
+        }
       }
     } catch (error) {
       emit(state.copyWith(
@@ -578,6 +663,13 @@ class PaymentBloc extends Bloc<PaymentEvent, PaymentState> {
       isWalletChargeError: false,
     ));
   }
+
+  closeSnackBar(){
+    if(Get.isSnackbarOpen){
+      Get.closeAllSnackbars();
+    }
+  }
+
 
   @override
   Future<void> close() {

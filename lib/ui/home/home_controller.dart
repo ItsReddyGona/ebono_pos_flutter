@@ -26,6 +26,7 @@ import 'package:ebono_pos/ui/home/model/phone_number_request.dart';
 import 'package:ebono_pos/ui/home/model/register_close_request.dart';
 import 'package:ebono_pos/ui/home/model/register_open_request.dart';
 import 'package:ebono_pos/ui/home/model/resume_hold_cart_request.dart';
+import 'package:ebono_pos/ui/home/model/terminam_transaction_request.dart';
 import 'package:ebono_pos/ui/home/model/update_cart.dart';
 import 'package:ebono_pos/ui/home/repository/home_repository.dart';
 import 'package:ebono_pos/ui/login/model/login_request.dart';
@@ -56,6 +57,7 @@ class HomeController extends GetxController {
   var scanCode = ''.obs;
   var cartId = ''.obs;
   var registerId = ''.obs;
+  var registerTransactionId = ''.obs;
   var clearWeightOnSuccess = false.obs;
 
   // for register section
@@ -132,16 +134,29 @@ class HomeController extends GetxController {
   var isQuantitySelected = false.obs;
   var overideApproverUserId = ''.obs;
   var couponDetails = ''.obs;
+  var pointedTo = 'LOCAL'.obs;
+
+  /* Loaders */
+  var isRegisterApiLoading = false.obs;
+  var isContinueWithOutCustomerBtnLoading = false.obs;
+  var isSearchCustomerBtnLoading = false.obs;
+  var isSelectOrAddCustomerBtnLoading = false.obs;
+
   RxList<AllowedPaymentMode> allowedPaymentModes = [AllowedPaymentMode()].obs;
+  List<TransactionSummary> transactionSummaryList = [];
+
+  // payment
+  var orderNumber = ''.obs;
 
   final _logoutDialogController = StreamController<bool>.broadcast();
 
   Stream<bool> get logoutDialogStream => _logoutDialogController.stream;
 
+  var pointingTo = 'LOCAl'.obs;
+
   void notifyDialogClosed() {
     _logoutDialogController.add(true);
   }
-
 
   @override
   void onInit() async {
@@ -173,6 +188,8 @@ class HomeController extends GetxController {
 
     registerId.value =
         hiveStorageHelper.read(SharedPreferenceConstants.registerId);
+    registerTransactionId.value =
+        hiveStorageHelper.read(SharedPreferenceConstants.registerTransactionId);
 
     isQuantityEditEnabled.value =
         hiveStorageHelper.read(SharedPreferenceConstants.isQuantityEditEnabled);
@@ -184,6 +201,7 @@ class HomeController extends GetxController {
         hiveStorageHelper.read(SharedPreferenceConstants.isPriceEditEnabled);
     isSalesAssociateLinkEnabled.value = hiveStorageHelper
         .read(SharedPreferenceConstants.isSalesAssociateLinkEnabled);
+    pointingTo.value = await sharedPreferenceHelper.pointingTo();
 
     final userData =
         hiveStorageHelper.read(SharedPreferenceConstants.userDetails);
@@ -232,8 +250,9 @@ class HomeController extends GetxController {
     ConnectivityResult result;
     try {
       result = await _connectivity.checkConnectivity();
-      final pointedTo = await sharedPreferenceHelper.pointingTo();
-      if (pointedTo == 'LOCAL') _updateConnectionStatus(result);
+      pointedTo.value = await sharedPreferenceHelper.pointingTo();
+
+      if (pointedTo.value == 'LOCAL') _updateConnectionStatus(result);
     } catch (e) {
       _statusCheckTimer?.cancel();
       isOnline.value = false;
@@ -397,8 +416,13 @@ class HomeController extends GetxController {
     }
   }
 
-  Future getCustomerDetails() async {
+  Future getCustomerDetails({
+    bool isFromCustomerScreen = false,
+  }) async {
     try {
+      /* handling loader in customer dialog */
+      isSearchCustomerBtnLoading.value = isFromCustomerScreen == true;
+
       var response =
           await _homeRepository.getCustomerDetails(phoneNumber.value);
       getCustomerDetailsResponse.value = response;
@@ -410,14 +434,23 @@ class HomeController extends GetxController {
       // fetchCartDetails();
     } catch (e) {
       Get.snackbar('Error while fetching customer details', '$e');
+    } finally {
+      isSearchCustomerBtnLoading.value = false;
     }
   }
 
   fetchCustomer({
     bool showOTPScreen = false,
     bool isFromReturns = false,
+    bool isContinueWithOutCustomer = false,
+    bool isSelectOrAddCustomer = false,
   }) async {
     try {
+      /* adding loader if cashier clicks on continue with out customer btn*/
+      isContinueWithOutCustomerBtnLoading.value =
+          isContinueWithOutCustomer == true;
+      isSelectOrAddCustomerBtnLoading.value = isSelectOrAddCustomer == true;
+
       final skipMergeCart =
           customerResponse.value.phoneNumber?.number == phoneNumber.value;
       var response = await _homeRepository.fetchCustomer(CustomerRequest(
@@ -453,6 +486,9 @@ class HomeController extends GetxController {
       }
     } catch (e) {
       Get.snackbar('Error while fetching customer data', '$e');
+    } finally {
+      isContinueWithOutCustomerBtnLoading.value = false;
+      isSelectOrAddCustomerBtnLoading.value = false;
     }
   }
 
@@ -643,7 +679,11 @@ class HomeController extends GetxController {
   Future<void> holdCartApiCall() async {
     try {
       var response = await _homeRepository.holdCart(
-          cartId.value, PhoneNumberRequest(phoneNumber: phoneNumber.value));
+        cartId.value,
+        PhoneNumberRequest(
+          phoneNumber: customerResponse.value.phoneNumber!.number,
+        ),
+      );
       generalSuccessResponse.value = response;
       cartId.value = '';
       getCustomerDetailsResponse.value = CustomerDetailsResponse();
@@ -663,15 +703,15 @@ class HomeController extends GetxController {
   Future<void> resumeHoldCartApiCall(String? id) async {
     try {
       var response = await _homeRepository.resumeHoldCart(
-          cartId.value,
+          id!,
           ResumeHoldCartRequest(
               terminalId:
                   "${hiveStorageHelper.read(SharedPreferenceConstants.selectedTerminalId)}",
               holdCartId: id));
-      cartResponse.value = response;
-      /* resetting the exsisting state */
-      isCustomerProxySelected.value = true;
+      /* resetting the existing state */
+      cartId.value = response.cartId ?? '';
       clearHoldCartOrders();
+      fetchCartDetails();
       selectedTabButton.value = 2;
     } catch (e) {
       Get.snackbar('Error while resuming cart', '$e');
@@ -742,7 +782,7 @@ class HomeController extends GetxController {
   Future<void> openRegisterApiCall() async {
     var userId = await sharedPreferenceHelper.getUserID();
 
-    isLoading.value = true;
+    isRegisterApiLoading.value = true;
     try {
       var response = await _homeRepository.openRegister(RegisterOpenRequest(
           outletId:
@@ -751,24 +791,28 @@ class HomeController extends GetxController {
               "${hiveStorageHelper.read(SharedPreferenceConstants.selectedTerminalId)}",
           userId: userId,
           floatCash: int.tryParse(openFloatPayment.value)));
+      print("openRegisterResponse: ${response.toJson()}");
       openRegisterResponse.value = response;
       hiveStorageHelper.save(SharedPreferenceConstants.registerId,
           openRegisterResponse.value.registerId ?? "");
       hiveStorageHelper.save(SharedPreferenceConstants.registerTransactionId,
           openRegisterResponse.value.registerTransactionId ?? "");
       registerId.value = openRegisterResponse.value.registerId ?? "";
+      registerTransactionId.value =
+          openRegisterResponse.value.registerTransactionId ?? "";
       openFloatPayment.value = '';
       selectedTabButton.value = 2;
-      isLoading.value = false;
-    } catch (e) {
+    } catch (e, stack) {
+      print("error: $e $stack");
       Get.snackbar('Error while opening register', '$e');
-      isLoading.value = false;
+    } finally {
+      isRegisterApiLoading.value = false;
     }
   }
 
   Future<void> closeRegisterApiCall() async {
     var userId = await sharedPreferenceHelper.getUserID();
-    isLoading.value = true;
+    isRegisterApiLoading.value = true;
     try {
       var response = await _homeRepository.closeRegister(RegisterCloseRequest(
         outletId:
@@ -822,6 +866,24 @@ class HomeController extends GetxController {
                       currency: "INR",
                     ),
                   );
+                case 'STATIC_QR_CODE':
+                  if (transactionSummaryList.isNotEmpty &&
+                      transactionSummaryList.first.pspId != null &&
+                      pointedTo.value == 'LOCAL') {
+                    return TransactionSummary(
+                      paymentOptionId: mode.paymentOptionId,
+                      paymentOptionCode: mode.paymentOptionCode,
+                      pspId: mode.pspId,
+                      pspName: mode.pspName,
+                      chargeSlipCount: int.tryParse(transactionSummaryList
+                              .first.chargeSlipCount
+                              .toString()) ??
+                          0,
+                      totalTransactionAmount:
+                          transactionSummaryList.first.totalTransactionAmount,
+                    );
+                  }
+                  return null;
                 default:
                   return null; // Ignore unsupported payment modes
               }
@@ -833,18 +895,23 @@ class HomeController extends GetxController {
       closeRegisterResponse.value = response;
       if (closeRegisterResponse.value.success == true) {
         hiveStorageHelper.save(SharedPreferenceConstants.registerId, "");
+        hiveStorageHelper.save(
+            SharedPreferenceConstants.registerTransactionId, "");
         registerId.value = "";
+        registerTransactionId.value = "";
         upiPayment.value = '';
         upiPaymentCount.value = '';
         cardPayment.value = '';
         cardPaymentCount.value = '';
         cashPayment.value = '';
         selectedTabButton.value = 2;
+        transactionSummaryList.clear();
       }
-      isLoading.value = false;
-    } catch (e) {
-      isLoading.value = false;
+    } catch (e, stack) {
+      print("error: $e $stack");
       Get.snackbar('Error while closing register', '$e');
+    } finally {
+      isRegisterApiLoading.value = false;
     }
   }
 
@@ -1014,6 +1081,31 @@ class HomeController extends GetxController {
       isOTPResendingOrVerifying.value = false;
       isOTPTriggering.value = false;
       isOTPVerified.value = false;
+    }
+  }
+
+  Future<List<TransactionSummary>> getTerminalTransactions() async {
+    try {
+      AllowedPaymentMode staticQrPaymentMode = allowedPaymentModes.firstWhere(
+        (mode) => mode.paymentOptionCode == 'STATIC_QR_CODE',
+        orElse: () => AllowedPaymentMode(),
+      );
+
+      final result = await _homeRepository.fetchTerminalTransactions(
+          payload: TerminalTransactionRequest(
+        outletId: selectedOutletId,
+        paymentMethods: [staticQrPaymentMode.paymentOptionId.toString()],
+        registerId: registerId.value,
+        registerTransactionId: registerTransactionId.value,
+        terminalId: selectedTerminalId,
+      ));
+
+      transactionSummaryList = result;
+
+      return result;
+    } catch (error) {
+      Get.snackbar('Error while fetching terminal transactions', '$error');
+      return [];
     }
   }
 
