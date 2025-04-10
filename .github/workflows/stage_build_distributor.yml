@@ -3,162 +3,50 @@ name: Stage Distributor Build
 on:
   # Allow manual trigger
   workflow_dispatch:
-
-  # Allow auto-trigger on push to the 'deployment' branch
   #push:
   #branches:
   #- Deployment
 
 jobs:
-  setup:
-    name: Setup Environment
+  build:
     runs-on: ubuntu-22.04
-    env:
-      PKG_CONFIG_PATH: /usr/lib/pkgconfig:/usr/share/pkgconfig
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    
+
     steps:
-      # Checkout the code
-      - name: Checkout code
+      # Setup Environment
+      - name: Setup Environment
+        run: |
+          # Checkout code
+          git clone ${{ github.repositoryUrl }} .
+          # Install required dependencies
+          sudo apt-get update && sudo apt upgrade -y
+          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
         uses: actions/checkout@v3
-        
-      # Get version
-      - name: Get version from pubspec.yaml
+      
+      - name: Setup Environment - Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.1"
+
+      # Prepare Build
+      - name: Prepare Build
         id: version
         run: |
+          # Get version from pubspec.yaml
           VERSION=$(grep '^version: ' pubspec.yaml | sed 's/version: //')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📋 Version: $VERSION"
+          # Install Flutter dependencies
+          flutter pub get
+          # Activate Flutter Distributor
+          dart pub global activate flutter_distributor
 
-  install_dependencies:
-    name: Install Dependencies
-    needs: setup
-    runs-on: ubuntu-22.04
-    env:
-      PKG_CONFIG_PATH: /usr/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      # Base development tools
-      - name: Install base dev tools
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: clang cmake git ninja-build pkg-config
-          version: 1.0
-
-      # UI libraries
-      - name: Install UI libraries
+      # Build and Deploy
+      - name: Build and Deploy
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libgtk-3-dev gtk+-3.0 pkg-config
-          
-      # System libraries
-      - name: Install system libraries
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: liblzma-dev libstdc++-12-dev libunwind-14-dev
-          version: 1.0
-
-
-      # Media libraries
-      - name: Install media libraries
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-
-  setup_flutter:
-    name: Setup Flutter
-    needs: install_dependencies
-    runs-on: ubuntu-22.04
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        
-      # Set up Flutter with cache
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.27.1"
-          cache: true
-          cache-key: flutter-:os:-:channel:-:version:-:arch:-:hash:-${{ hashFiles('**/pubspec.lock') }}
-      
-      # Cache pub dependencies
-      - name: Cache pub dependencies
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.PUB_CACHE }}
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: ${{ runner.os }}-pub-
-
-      # Install Flutter dependencies
-      - name: Install Flutter dependencies
-        run: flutter pub get
-        
-      # Cache Flutter Distributor
-      - name: Cache Flutter Distributor
-        uses: actions/cache@v3
-        with:
-          path: ~/.pub-cache/bin
-          key: ${{ runner.os }}-flutter-distributor-cache
- 
-      # Activate Flutter Distributor (only if not cached)
-      - name: Activate Flutter Distributor
-        run: |
-          if [ ! -f ~/.pub-cache/bin/flutter_distributor ]; then
-            dart pub global activate flutter_distributor
-          fi
-
-  build:
-    name: Build Application
-    needs: [setup, setup_flutter]
-    runs-on: ubuntu-22.04
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        
-      # Set up Flutter with cache
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.27.1"
-          cache: true
-      
-      # Restore Flutter Distributor
-      - name: Restore Flutter Distributor cache
-        uses: actions/cache@v3
-        with:
-          path: ~/.pub-cache/bin
-          key: ${{ runner.os }}-flutter-distributor-cache
-        
-      # Install Flutter dependencies
-      - name: Install Flutter dependencies
-        run: flutter pub get
-        
-      # Verify GTK installation
-      - name: Verify GTK Installation
-        run: |
-          echo "Checking GTK installation..."
-          pkg-config --modversion gtk+-3.0 || echo "GTK 3.0 not found in pkg-config"
-          ls -l /usr/lib/*/pkgconfig/gtk+-3.0.pc || echo "GTK PC file not found"
-          
-      # Generate the build using Flutter Distributor
-      - name: Build Stage Release
-        run: |
-          export PATH="$PATH":"$HOME/.pub-cache/bin"
-          # Ensure GTK is properly detected
-          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig
-          flutter config --enable-linux-desktop
-          flutter doctor -v
+          # Build Stage Release
           flutter_distributor release --name=stage --jobs=release-stage-linux-deb
-
-      # Upload artifacts (deb file)
-      - name: Upload build artifact
+        
+      - name: Build and Deploy - Upload
         uses: actions/upload-artifact@v4
         with:
-          name: stage-release-${{ needs.setup.outputs.version }}
+          name: stage-release-${{ steps.version.outputs.version }}
           path: dist/
