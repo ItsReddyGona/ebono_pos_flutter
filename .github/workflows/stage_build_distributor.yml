@@ -60,7 +60,7 @@ jobs:
       - name: Install media libraries
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          sudo apt-get install -y libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
   setup_flutter:
     name: Setup Flutter
