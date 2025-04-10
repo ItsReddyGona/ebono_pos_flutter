@@ -3,6 +3,8 @@ name: Stage Distributor Build
 on:
   # Allow manual trigger
   workflow_dispatch:
+
+  # Allow auto-trigger on push to the 'deployment' branch
   #push:
   #branches:
   #- Deployment
@@ -12,40 +14,44 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      # Setup Environment
-      - name: Setup Environment
+      # Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Install system dependencies
+      - name: Install required dependencies
         run: |
-          # Checkout code
-          git clone ${{ github.repositoryUrl }} .
-          # Install required dependencies
           sudo apt-get update && sudo apt upgrade -y
           sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-        uses: actions/checkout@v3
-      
-      - name: Setup Environment - Flutter
+
+      # Set up Flutter
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.27.1"
 
-      # Prepare Build
-      - name: Prepare Build
+      # Get version
+      - name: Get version from pubspec.yaml
         id: version
         run: |
-          # Get version from pubspec.yaml
           VERSION=$(grep '^version: ' pubspec.yaml | sed 's/version: //')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          # Install Flutter dependencies
-          flutter pub get
-          # Activate Flutter Distributor
-          dart pub global activate flutter_distributor
 
-      # Build and Deploy
-      - name: Build and Deploy
+      # Install Flutter dependencies
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # Activate Flutter Distributor
+      - name: Activate Flutter Distributor
+        run: dart pub global activate flutter_distributor
+
+      # Generate the build using Flutter Distributor
+      - name: Build Stage Release
         run: |
-          # Build Stage Release
           flutter_distributor release --name=stage --jobs=release-stage-linux-deb
-        
-      - name: Build and Deploy - Upload
+
+      # Optional: Upload artifacts (deb file)
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: stage-release-${{ steps.version.outputs.version }}
