@@ -59,8 +59,9 @@ jobs:
       - name: Install system libraries
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
-          packages: liblzma-dev libstdc++-12-dev libunwind-dev
+          packages: liblzma-dev libstdc++-12-dev libunwind-14-dev
           version: 1.0
+
 
       # Media libraries
       - name: Install media libraries
